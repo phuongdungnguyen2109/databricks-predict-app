@@ -82,12 +82,36 @@ def generate_live_data():
     ── THAY THẾ BẰNG SPARK ──────────────────────────────────
     try:
         from pyspark.sql import SparkSession
+        from pyspark.sql.functions import col
+
         spark = SparkSession.builder.getOrCreate()
-        df = spark.table("default.uber_gold_pricing").toPandas()
-        return df
-    except:
-        pass  # fallback to mock below
-    ─────────────────────────────────────────────────────────
+        df = (
+            spark.table("default.uber_gold_pricing")
+            .select(
+                col("pickup_location").alias("zone"),
+                col("vehicle_type"),
+                col("demand").cast("double"),
+                col("supply_proxy").cast("double").alias("supply"),
+                col("supply_demand_ratio").cast("double"),
+                col("predicted_surge_multiplier").alias("surge_multiplier"),
+                col("base_price").cast("double"),
+                col("final_price").cast("double"),
+                col("meantemp").cast("double"),
+                col("humidity").cast("double"),
+                col("wind_speed").cast("double"),
+                col("cancel_rate_pct").cast("double").alias("cancel_rate"),
+                col("avg_vtat_clean").cast("double").alias("avg_eta"),
+                col("is_peak_hour").alias("is_peak"),
+            )
+            .fillna(0)
+            .toPandas()
+        )
+        df["lat"] = df["zone"].map(lambda z: ZONE_COORDS.get(z, (28.60, 77.20))[0])
+        df["lon"] = df["zone"].map(lambda z: ZONE_COORDS.get(z, (28.60, 77.20))[1])
+        if len(df) > 0:
+            return df
+    except Exception as e:
+        print(f"⚠️ Spark read failed: {e} — dùng mock data")
     """
     now = datetime.now()
     hour = now.hour
