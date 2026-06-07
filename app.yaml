@@ -1,0 +1,1 @@
+command: ["python", "surge_dashboard_app.py"]
