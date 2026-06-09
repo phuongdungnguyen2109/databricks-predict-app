@@ -80,6 +80,7 @@ def generate_live_data():
     surge = f(demand, supply_ratio, peak_hour, weather)
     
     ── THAY THẾ BẰNG SPARK ──────────────────────────────────
+    """
     try:
         from pyspark.sql import SparkSession
         from pyspark.sql.functions import col
@@ -112,7 +113,7 @@ def generate_live_data():
             return df
     except Exception as e:
         print(f"⚠️ Spark read failed: {e} — dùng mock data")
-    """
+    
     now = datetime.now()
     hour = now.hour
     is_peak = (7 <= hour <= 9) or (17 <= hour <= 20)
