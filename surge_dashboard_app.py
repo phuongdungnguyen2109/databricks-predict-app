@@ -68,7 +68,7 @@ def generate_live_data():
     """
     DATABRICKS_HOST = os.getenv("DATABRICKS_HOST", "https://dbc-52936fd5-e087.cloud.databricks.com")
     DATABRICKS_TOKEN = os.getenv("DATABRICKS_TOKEN", "dapie52298aa741859bfa3588877a92800e4")
-    ENDPOINT_NAME = os.getenv("MODEL_ENDPOINT_NAME", "surge_multiplier_predictor")
+    ENDPOINT_NAME = os.getenv("MODEL_ENDPOINT_NAME", "module5_dynamic_pricing_endpoint")
 
     now = datetime.now()
     rows = []
