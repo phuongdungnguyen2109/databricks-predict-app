@@ -97,9 +97,11 @@ def generate_live_data():
     # Đóng gói bản ghi gửi API
     scoring_data = {"dataframe_records": df[feature_columns].to_dict(orient="records")}
     
-    # Tự động dọn dẹp để đảm bảo đuôi URL luôn luôn chỉ có duy nhất 1 chữ /invocations
-    clean_endpoint = ENDPOINT_NAME.split('/invocations')[0].strip()
-    url = f"{DATABRICKS_HOST.rstrip('/')}/api/2.0/serving-endpoints/{clean_endpoint}/invocations"
+    # Bóc tách dứt điểm để lấy tên Endpoint sạch, loại bỏ mọi loại đuôi lặp
+    endpoint_clean = ENDPOINT_NAME.split('/')[0].strip()
+    
+    # Định dạng URL chuẩn chỉnh theo tài liệu Databricks API
+    url = f"{DATABRICKS_HOST.rstrip('/')}/api/2.0/serving-endpoints/{endpoint_clean}/invocations"
     headers = {
         "Authorization": f"Bearer {DATABRICKS_TOKEN}",
         "Content-Type": "application/json"
