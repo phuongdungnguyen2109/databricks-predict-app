@@ -62,28 +62,27 @@ ZONE_COORDS = {
 }
 def generate_live_data():
     """
-    Chuẩn bị đúng 12 đặc trưng (Features) và ép kiểu dữ liệu chuẩn xác 100% 
-    theo Schema mô hình XGBoost của Module 5 để kích hoạt Dashboard thành công.
+    Chuẩn bị dữ liệu và tự động đồng bộ hóa Endpoint động để dứt điểm lỗi 404.
     """
     raw_host = os.getenv("DATABRICKS_HOST", "https://dbc-52936fd5-e087.cloud.databricks.com")
     DATABRICKS_HOST = raw_host.strip().rstrip('/')
     DATABRICKS_TOKEN = os.getenv("DATABRICKS_TOKEN", "dapie52298aa741859bfa3588877a92800e4")
-    ENDPOINT_NAME = "module5_dynamic_pricing_endpoint"
+    
+    # TỰ ĐỘNG LẤY TÊN ENDPOINT: Ưu tiên biến hệ thống, nếu không có sẽ lấy tên mặc định chuẩn
+    ENDPOINT_NAME = os.getenv("MODEL_ENDPOINT_NAME", "surge_multiplier_predictor").strip()
+    # Loại bỏ các ký tự thừa hoặc đuôi gạch chéo nếu hệ thống tự nối vào
+    ENDPOINT_NAME = ENDPOINT_NAME.split('/')[0]
 
     now = datetime.now()
     rows = []
     
     for zone in NCR_ZONES:
         for vtype in random.sample(VEHICLE_TYPES, k=random.randint(4, 6)):
-            # Giả lập các chỉ số tương tự tập Silver đầu vào
             demand_val = float(random.randint(5, 50))
             supply_val = float(max(1.0, float(demand_val * random.uniform(0.2, 1.1))))
             s_d_ratio = round(supply_val / demand_val, 4) if demand_val > 0 else 1.0
-            
-            # Khởi tạo trạng thái giờ cao điểm (Peak hour từ 16h - 20h hoặc 8h - 10h)
             is_peak = 1.0 if now.hour in [8, 9, 17, 18, 19] else 0.0
             
-            # Đóng gói chuẩn xác 12 cột đặc trưng (Kiểu dữ liệu Double / Float toán học)
             rows.append({
                 "zone": zone,
                 "vehicle_type": vtype,
@@ -104,17 +103,18 @@ def generate_live_data():
             
     df = pd.DataFrame(rows)
     
-    # 12 Cột đặc trưng bắt buộc - Khớp thứ tự 100% với file notebook tập huấn mô hình của bạn
+    # 12 cột tính năng bắt buộc từ Module 5
     feature_columns = [
         "demand", "supply_proxy", "avg_vtat_clean", "meantemp", "humidity", "wind_speed",
         "hour", "day_of_week", "cancel_rate_pct", "is_peak_hour_int", "traffic_factor", "supply_demand_ratio"
     ]
     
-    # Đóng gói định dạng JSON theo đúng chuẩn dữ liệu bảng (dataframe_records)
+    # Đóng gói gói tin theo chuẩn bản ghi dữ liệu bảng
     scoring_data = {
         "dataframe_records": df[feature_columns].to_dict(orient="records")
     }
     
+    # Xây dựng URL chuẩn không bao giờ bị lặp từ khóa
     url = f"{DATABRICKS_HOST}/api/2.0/serving-endpoints/{ENDPOINT_NAME}/invocations"
     headers = {
         "Authorization": f"Bearer {DATABRICKS_TOKEN}",
@@ -122,19 +122,28 @@ def generate_live_data():
     }
     
     try:
-        response = requests.post(url, headers=headers, json=scoring_data, timeout=12)
+        response = requests.post(url, headers=headers, json=scoring_data, timeout=10)
         
         if response.status_code == 200:
             predictions = response.json().get("predictions", [])
             df["surge_multiplier"] = [round(max(1.0, float(p)), 2) for p in predictions]
             df["api_status"] = "CONNECTED (XGBoost Realtime)"
         else:
-            df["api_status"] = f"OFFLINE FALLBACK (HTTP {response.status_code})"
-            raise ValueError(f"HTTP {response.status_code}")
+            # Nếu Endpoint mặc định lỗi, thử fallback gọi endpoint dự phòng thứ 2
+            backup_endpoint = "module5_dynamic_pricing_endpoint"
+            url_backup = f"{DATABRICKS_HOST}/api/2.0/serving-endpoints/{backup_endpoint}/invocations"
+            res_backup = requests.post(url_backup, headers=headers, json=scoring_data, timeout=10)
             
-    except Exception as e:
-        df["api_status"] = f"OFFLINE FALLBACK ({str(e)[:15]})"
-        # Thuật toán dự phòng khẩn cấp phục hồi đồ thị khi API nghẽn mạng
+            if res_backup.status_code == 200:
+                predictions = res_backup.json().get("predictions", [])
+                df["surge_multiplier"] = [round(max(1.0, float(p)), 2) for p in predictions]
+                df["api_status"] = "CONNECTED (XGBoost Realtime)"
+            else:
+                df["api_status"] = f"OFFLINE FALLBACK (HTTP {res_backup.status_code})"
+                raise ValueError()
+            
+    except Exception:
+        # Cơ chế rule-based của Module 5 tự chạy offline trên App để cứu Dashboard
         surge_list = []
         for _, r in df.iterrows():
             if r["demand"] > 30 and r["supply_demand_ratio"] < 0.3: surge = 2.8
@@ -144,7 +153,6 @@ def generate_live_data():
             surge_list.append(surge)
         df["surge_multiplier"] = surge_list
 
-    # Tính toán các cột bổ trợ giao diện đồ họa
     df["final_price"] = round(df["base_price"] * df["surge_multiplier"], 2)
     df["lat"] = df["zone"].map(lambda z: ZONE_COORDS.get(z, (28.60, 77.20))[0]) + np.random.uniform(-0.005, 0.005, len(df))
     df["lon"] = df["zone"].map(lambda z: ZONE_COORDS.get(z, (28.60, 77.20))[1]) + np.random.uniform(-0.005, 0.005, len(df))
