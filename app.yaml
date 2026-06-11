@@ -8,4 +8,4 @@ env:
   - name: "DATABRICKS_TOKEN"
     value: "dapie52298aa741859bfa3588877a92800e4"
   - name: "MODEL_ENDPOINT_NAME"
-    value: "module5_dynamic_pricing_endpoint"
+    value: "surge_multiplier_predictor"
