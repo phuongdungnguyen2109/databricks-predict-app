@@ -73,7 +73,7 @@ def generate_live_data():
     DATABRICKS_TOKEN = os.getenv("DATABRICKS_TOKEN", "dapie52298aa741859bfa3588877a92800e4")
     
     # Định danh Endpoint chuẩn từ ảnh quản trị của bạn
-    ENDPOINT_NAME = "module5_dynamic_pricing_endpoint"
+    ENDPOINT_NAME = "surge_multiplier_predictor"
 
     now = datetime.now()
     rows = []
