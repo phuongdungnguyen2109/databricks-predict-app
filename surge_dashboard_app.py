@@ -63,12 +63,17 @@ ZONE_COORDS = {
 
 def generate_live_data():
     """
-    Chuẩn bị đặc trưng (Features) và ép kiểu dữ liệu chuẩn xác 100% 
-    theo Schema mô hình XGBoost yêu cầu để tránh lỗi HTTP 400.
+    Chuẩn bị đặc trưng và đóng gói theo cấu hình chuẩn của Databricks Serving Endpoint.
     """
-    DATABRICKS_HOST = os.getenv("DATABRICKS_HOST", "https://dbc-52936fd5-e087.cloud.databricks.com")
+    # Lấy thông tin cấu hình làm sạch đường dẫn HOST
+    raw_host = os.getenv("DATABRICKS_HOST", "https://dbc-52936fd5-e087.cloud.databricks.com")
+    DATABRICKS_HOST = raw_host.strip().rstrip('/')
+    
+    # ĐIỀN CHÍNH XÁC TOKEN THẬT VÀO ĐÂY (Vì tab Environment của bạn đang trống biến này)
     DATABRICKS_TOKEN = os.getenv("DATABRICKS_TOKEN", "dapie52298aa741859bfa3588877a92800e4")
-    ENDPOINT_NAME = os.getenv("MODEL_ENDPOINT_NAME", "module5_dynamic_pricing_endpoint")
+    
+    # Định danh Endpoint chuẩn từ ảnh quản trị của bạn
+    ENDPOINT_NAME = "module5_dynamic_pricing_endpoint"
 
     now = datetime.now()
     rows = []
@@ -78,7 +83,6 @@ def generate_live_data():
             demand_val = float(random.randint(5, 50))
             supply_val = float(max(1.0, float(demand_val * random.uniform(0.2, 1.1))))
             
-            # Ép kiểu chuẩn xác: demand/supply_proxy -> float (double), hour/day -> int (long)
             rows.append({
                 "zone": zone,
                 "vehicle_type": vtype,
@@ -90,38 +94,39 @@ def generate_live_data():
             })
             
     df = pd.DataFrame(rows)
-    
-    # 4 cột đặc trưng khớp hoàn toàn với cấu trúc Endpoint hiển thị
     feature_columns = ["demand", "supply_proxy", "hour", "day_of_week"]
     
-    # Đóng gói bản ghi gửi API
-    scoring_data = {"dataframe_records": df[feature_columns].to_dict(orient="records")}
+    # Định dạng gói tin dataframe_split theo chuẩn khuyến nghị trên tab Overview Endpoint của bạn
+    scoring_data = {
+        "dataframe_split": {
+            "columns": feature_columns,
+            "data": df[feature_columns].values.tolist()
+        }
+    }
     
-    # Bóc tách dứt điểm để lấy tên Endpoint sạch, loại bỏ mọi loại đuôi lặp
-    endpoint_clean = ENDPOINT_NAME.split('/')[0].strip()
+    # Thiết lập URL chuẩn xác tuyệt đối không lặp từ
+    url = f"{DATABRICKS_HOST}/api/2.0/serving-endpoints/{ENDPOINT_NAME}/invocations"
     
-    # Định dạng URL chuẩn chỉnh theo tài liệu Databricks API
-    url = f"{DATABRICKS_HOST.rstrip('/')}/api/2.0/serving-endpoints/{endpoint_clean}/invocations"
     headers = {
         "Authorization": f"Bearer {DATABRICKS_TOKEN}",
         "Content-Type": "application/json"
     }
     
     try:
-        response = requests.post(url, headers=headers, json=scoring_data, timeout=8)
+        # Tăng timeout lên 15 giây phòng trường hợp cụm Free Edition phản hồi chậm
+        response = requests.post(url, headers=headers, json=scoring_data, timeout=15)
+        
         if response.status_code == 200:
+            # Xử lý bóc tách kết quả trả về từ mô hình
             predictions = response.json().get("predictions", [])
             df["surge_multiplier"] = [round(max(1.0, float(p)), 2) for p in predictions]
             df["api_status"] = "CONNECTED (XGBoost Realtime)"
         else:
             df["api_status"] = f"OFFLINE FALLBACK (HTTP {response.status_code})"
-            raise ValueError(f"HTTP {response.status_code}")
             
     except Exception as e:
-        # Cơ chế dự phòng an toàn nếu kết nối trục trặc
-        if "api_status" not in df.columns:
-            df["api_status"] = f"OFFLINE FALLBACK ({str(e)})"
-        
+        df["api_status"] = f"OFFLINE FALLBACK ({str(e)[:20]})"
+        # Thuật toán dự phòng tính toán tại chỗ nếu kết nối thất bại
         surge_list = []
         for _, r in df.iterrows():
             sdr = r["supply_proxy"] / r["demand"] if r["demand"] > 0 else 1
@@ -131,13 +136,13 @@ def generate_live_data():
             surge_list.append(surge)
         df["surge_multiplier"] = surge_list
 
-    # Tính toán các cột hỗ trợ giao diện đồ họa
+    # Tính toán các thành phần hiển thị đồ họa
     df["supply_demand_ratio"] = round(df["supply_proxy"] / df["demand"], 3)
     df["final_price"] = round(df["base_price"] * df["surge_multiplier"], 2)
     df["lat"] = df["zone"].map(lambda z: ZONE_COORDS.get(z, (28.60, 77.20))[0]) + np.random.uniform(-0.005, 0.005, len(df))
     df["lon"] = df["zone"].map(lambda z: ZONE_COORDS.get(z, (28.60, 77.20))[1]) + np.random.uniform(-0.005, 0.005, len(df))
     
-    df.rename(columns={"supply_proxy": "supply", "base_price": "base_price"}, inplace=True)
+    df.rename(columns={"supply_proxy": "supply"}, inplace=True)
     return df
 # ════════════════════════════════════════════════════════════════
 # LAYOUT & DESIGN SYSTEM
