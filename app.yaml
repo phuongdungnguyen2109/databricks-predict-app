@@ -1,1 +1,5 @@
 command: ["python", "surge_dashboard_app.py"]
+
+env:
+  - name: "DATABRICKS_WAREHOUSE_ID"
+    value: "bda20b54525e3c76"
