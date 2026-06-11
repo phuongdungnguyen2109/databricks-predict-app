@@ -63,15 +63,20 @@ ZONE_COORDS = {
 def generate_live_data():
     """
     Chuẩn bị dữ liệu và tự động đồng bộ hóa Endpoint động để dứt điểm lỗi 404.
+    Tích hợp cơ chế chống ngủ đông (Anti-Scale to Zero) và kiểm tra chéo 2 Endpoint.
     """
     raw_host = os.getenv("DATABRICKS_HOST", "https://dbc-52936fd5-e087.cloud.databricks.com")
     DATABRICKS_HOST = raw_host.strip().rstrip('/')
     DATABRICKS_TOKEN = os.getenv("DATABRICKS_TOKEN", "dapie52298aa741859bfa3588877a92800e4")
     
-    # TỰ ĐỘNG LẤY TÊN ENDPOINT: Ưu tiên biến hệ thống, nếu không có sẽ lấy tên mặc định chuẩn
-    ENDPOINT_NAME = os.getenv("MODEL_ENDPOINT_NAME", "surge_multiplier_predictor").strip()
-    # Loại bỏ các ký tự thừa hoặc đuôi gạch chéo nếu hệ thống tự nối vào
-    ENDPOINT_NAME = ENDPOINT_NAME.split('/')[0]
+    # Danh sách các Endpoint bạn đang có để hệ thống tự động quét chéo
+    endpoints_to_try = ["surge_multiplier_predictor", "module5_dynamic_pricing_endpoint"]
+    
+    # Đọc cấu hình ưu tiên từ biến môi trường nếu có
+    env_endpoint = os.getenv("MODEL_ENDPOINT_NAME", "").strip().split('/')[0]
+    if env_endpoint and env_endpoint in endpoints_to_try:
+        endpoints_to_try.remove(env_endpoint)
+        endpoints_to_try.insert(0, env_endpoint)
 
     now = datetime.now()
     rows = []
@@ -103,47 +108,45 @@ def generate_live_data():
             
     df = pd.DataFrame(rows)
     
-    # 12 cột tính năng bắt buộc từ Module 5
+    # 12 cột tính năng đầu vào chuẩn chỉnh theo đúng Schema của mô hình
     feature_columns = [
         "demand", "supply_proxy", "avg_vtat_clean", "meantemp", "humidity", "wind_speed",
         "hour", "day_of_week", "cancel_rate_pct", "is_peak_hour_int", "traffic_factor", "supply_demand_ratio"
     ]
     
-    # Đóng gói gói tin theo chuẩn bản ghi dữ liệu bảng
     scoring_data = {
         "dataframe_records": df[feature_columns].to_dict(orient="records")
     }
     
-    # Xây dựng URL chuẩn không bao giờ bị lặp từ khóa
-    url = f"{DATABRICKS_HOST}/api/2.0/serving-endpoints/{ENDPOINT_NAME}/invocations"
     headers = {
         "Authorization": f"Bearer {DATABRICKS_TOKEN}",
         "Content-Type": "application/json"
     }
     
-    try:
-        response = requests.post(url, headers=headers, json=scoring_data, timeout=10)
-        
-        if response.status_code == 200:
-            predictions = response.json().get("predictions", [])
-            df["surge_multiplier"] = [round(max(1.0, float(p)), 2) for p in predictions]
-            df["api_status"] = "CONNECTED (XGBoost Realtime)"
-        else:
-            # Nếu Endpoint mặc định lỗi, thử fallback gọi endpoint dự phòng thứ 2
-            backup_endpoint = "module5_dynamic_pricing_endpoint"
-            url_backup = f"{DATABRICKS_HOST}/api/2.0/serving-endpoints/{backup_endpoint}/invocations"
-            res_backup = requests.post(url_backup, headers=headers, json=scoring_data, timeout=10)
-            
-            if res_backup.status_code == 200:
-                predictions = res_backup.json().get("predictions", [])
-                df["surge_multiplier"] = [round(max(1.0, float(p)), 2) for p in predictions]
-                df["api_status"] = "CONNECTED (XGBoost Realtime)"
-            else:
-                df["api_status"] = f"OFFLINE FALLBACK (HTTP {res_backup.status_code})"
-                raise ValueError()
-            
-    except Exception:
-        # Cơ chế rule-based của Module 5 tự chạy offline trên App để cứu Dashboard
+    success = False
+    predictions = []
+    active_endpoint_name = ""
+
+    # Vòng lặp quét lỗi kết nối chéo giữa các Endpoint
+    for endpoint in endpoints_to_try:
+        url = f"{DATABRICKS_HOST}/api/2.0/serving-endpoints/{endpoint}/invocations"
+        try:
+            # Tăng timeout lên 25 giây để cho phép mô hình đang ngủ đông (Scaled to zero) có đủ thời gian khởi động lại
+            response = requests.post(url, headers=headers, json=scoring_data, timeout=25)
+            if response.status_code == 200:
+                predictions = response.json().get("predictions", [])
+                active_endpoint_name = endpoint
+                success = True
+                break
+        except Exception:
+            continue
+
+    if success and len(predictions) == len(df):
+        df["surge_multiplier"] = [round(max(1.0, float(p)), 2) for p in predictions]
+        df["api_status"] = f"CONNECTED ({active_endpoint_name})"
+    else:
+        # Nhảy về Rule-based cứu cánh Dashboard khi toàn bộ hệ thống API bảo trì hoặc chưa bật
+        df["api_status"] = "OFFLINE FALLBACK (HTTP 404 - Model Sleeping)"
         surge_list = []
         for _, r in df.iterrows():
             if r["demand"] > 30 and r["supply_demand_ratio"] < 0.3: surge = 2.8
