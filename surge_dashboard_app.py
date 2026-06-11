@@ -63,34 +63,27 @@ ZONE_COORDS = {
 
 def generate_live_data():
     """
-    Chuẩn bị đặc trưng (Features) realtime và gọi trực tiếp sang 
-    Databricks Model Serving để nhận kết quả Surge Multiplier thực tế từ mô hình XGBoost.
+    Chuẩn bị đặc trưng (Features) và ép kiểu dữ liệu chuẩn xác 100% 
+    theo Schema mô hình XGBoost yêu cầu để tránh lỗi HTTP 400.
     """
-    # Đọc cấu hình từ Biến môi trường của Databricks App (Do bạn cấu hình ở mục App Settings)
-    DATABRICKS_HOST = os.getenv("DATABRICKS_HOST", "https://your-instance.cloud.databricks.com")
-    DATABRICKS_TOKEN = os.getenv("DATABRICKS_TOKEN", "dapi_mock_token")
-    ENDPOINT_NAME = os.getenv("MODEL_ENDPOINT_NAME", "module5_dynamic_pricing_endpoint")
+    DATABRICKS_HOST = os.getenv("DATABRICKS_HOST", "https://dbc-52936fd5-e087.cloud.databricks.com")
+    DATABRICKS_TOKEN = os.getenv("DATABRICKS_TOKEN", "dapie52298aa741859bfa3588877a92800e4")
+    ENDPOINT_NAME = os.getenv("MODEL_ENDPOINT_NAME", "surge_multiplier_predictor")
 
     now = datetime.now()
     rows = []
     
-    # Giả lập luồng dữ liệu đầu vào hiện tại của các Zone để gửi đi dự đoán
     for zone in NCR_ZONES:
         for vtype in random.sample(VEHICLE_TYPES, k=random.randint(4, 6)):
-            demand = float(random.randint(2, 45))
-            supply = float(max(1, int(demand * random.uniform(0.3, 1.2))))
+            demand_val = float(random.randint(5, 50))
+            supply_val = float(max(1.0, float(demand_val * random.uniform(0.2, 1.1))))
             
+            # Ép kiểu chuẩn xác: demand/supply_proxy -> float (double), hour/day -> int (long)
             rows.append({
                 "zone": zone,
                 "vehicle_type": vtype,
-                "demand": demand,
-                "supply_proxy": supply,
-                "avg_vtat_clean": float(random.uniform(3, 18)),
-                "meantemp": float(random.uniform(28, 42)),
-                "humidity": float(random.uniform(40, 95)),
-                "wind_speed": float(random.uniform(5, 35)),
-                "cancel_rate_pct": float(random.uniform(0, 45)),
-                "traffic_factor": float(random.uniform(1.0, 2.0)),
+                "demand": float(demand_val),
+                "supply_proxy": float(supply_val),
                 "hour": int(now.hour),
                 "day_of_week": int(now.weekday()),
                 "base_price": float(BASE_PRICES.get(vtype, 70))
@@ -98,13 +91,10 @@ def generate_live_data():
             
     df = pd.DataFrame(rows)
     
-    # Danh sách 10 cột đặc trưng đầu vào (FEATURES) chính xác của mô hình XGBoost Module 5
-    feature_columns = [
-        "demand", "supply_proxy", "avg_vtat_clean", "meantemp", 
-        "humidity", "wind_speed", "cancel_rate_pct", "traffic_factor", "hour", "day_of_week"
-    ]
+    # 4 cột đặc trưng khớp hoàn toàn với cấu trúc Endpoint hiển thị
+    feature_columns = ["demand", "supply_proxy", "hour", "day_of_week"]
     
-    # Đóng gói JSON theo chuẩn Databricks Invocations
+    # Đóng gói bản ghi gửi API
     scoring_data = {"dataframe_records": df[feature_columns].to_dict(orient="records")}
     
     url = f"{DATABRICKS_HOST.rstrip('/')}/api/2.0/serving-endpoints/{ENDPOINT_NAME}/invocations"
@@ -114,39 +104,37 @@ def generate_live_data():
     }
     
     try:
-        # Gọi API tới mô hình thực tế
         response = requests.post(url, headers=headers, json=scoring_data, timeout=8)
         if response.status_code == 200:
             predictions = response.json().get("predictions", [])
-            # Áp dụng hệ số Surge thực tế trả về từ XGBoost
             df["surge_multiplier"] = [round(max(1.0, float(p)), 2) for p in predictions]
             df["api_status"] = "CONNECTED (XGBoost Realtime)"
         else:
+            df["api_status"] = f"OFFLINE FALLBACK (HTTP {response.status_code})"
             raise ValueError(f"HTTP {response.status_code}")
             
     except Exception as e:
-        # Nhánh Fallback: Dự phòng thuật toán rule-based nếu API mô hình chưa cấu hình / bị sập
-        df["api_status"] = f"OFFLINE FALLBACK ({str(e)})"
+        # Cơ chế dự phòng an toàn nếu kết nối trục trặc
+        if "api_status" not in df.columns:
+            df["api_status"] = f"OFFLINE FALLBACK ({str(e)})"
+        
         surge_list = []
         for _, r in df.iterrows():
-            sdr = r["supply_proxy"] / r["demand"]
-            is_peak = (7 <= r["hour"] <= 9) or (17 <= r["hour"] <= 20)
-            if r["demand"] > 20 and sdr < 0.4: surge = 2.3
-            elif r["demand"] > 10 and is_peak: surge = 1.8
-            elif r["meantemp"] > 38: surge = 1.6
+            sdr = r["supply_proxy"] / r["demand"] if r["demand"] > 0 else 1
+            if sdr < 0.4: surge = 2.0
+            elif sdr < 0.7: surge = 1.5
             else: surge = 1.0
             surge_list.append(surge)
         df["surge_multiplier"] = surge_list
 
-    # Tính toán các trường hiển thị cho giao diện đồ họa
+    # Tính toán các cột hỗ trợ giao diện đồ họa
     df["supply_demand_ratio"] = round(df["supply_proxy"] / df["demand"], 3)
     df["final_price"] = round(df["base_price"] * df["surge_multiplier"], 2)
     df["lat"] = df["zone"].map(lambda z: ZONE_COORDS.get(z, (28.60, 77.20))[0]) + np.random.uniform(-0.005, 0.005, len(df))
     df["lon"] = df["zone"].map(lambda z: ZONE_COORDS.get(z, (28.60, 77.20))[1]) + np.random.uniform(-0.005, 0.005, len(df))
     
-    df.rename(columns={"supply_proxy": "supply", "cancel_rate_pct": "cancel_rate", "avg_vtat_clean": "avg_eta"}, inplace=True)
+    df.rename(columns={"supply_proxy": "supply", "base_price": "base_price"}, inplace=True)
     return df
-
 # ════════════════════════════════════════════════════════════════
 # LAYOUT & DESIGN SYSTEM
 # ════════════════════════════════════════════════════════════════
