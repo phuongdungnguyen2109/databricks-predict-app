@@ -60,7 +60,6 @@ ZONE_COORDS = {
     "Ghaziabad":            (28.6692, 77.4538),
     "Central Secretariat":  (28.6145, 77.2090),
 }
-
 def generate_live_data():
     """
     Chuẩn bị đúng 12 đặc trưng (Features) và ép kiểu dữ liệu chuẩn xác 100% 
@@ -69,7 +68,7 @@ def generate_live_data():
     raw_host = os.getenv("DATABRICKS_HOST", "https://dbc-52936fd5-e087.cloud.databricks.com")
     DATABRICKS_HOST = raw_host.strip().rstrip('/')
     DATABRICKS_TOKEN = os.getenv("DATABRICKS_TOKEN", "dapie52298aa741859bfa3588877a92800e4")
-    ENDPOINT_NAME = "surge_multiplier_predictor"
+    ENDPOINT_NAME = "module5_dynamic_pricing_endpoint"
 
     now = datetime.now()
     rows = []
