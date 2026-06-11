@@ -63,16 +63,12 @@ ZONE_COORDS = {
 
 def generate_live_data():
     """
-    Chuẩn bị đặc trưng và đóng gói theo cấu hình chuẩn của Databricks Serving Endpoint.
+    Chuẩn bị đúng 12 đặc trưng (Features) và ép kiểu dữ liệu chuẩn xác 100% 
+    theo Schema mô hình XGBoost của Module 5 để kích hoạt Dashboard thành công.
     """
-    # Lấy thông tin cấu hình làm sạch đường dẫn HOST
     raw_host = os.getenv("DATABRICKS_HOST", "https://dbc-52936fd5-e087.cloud.databricks.com")
     DATABRICKS_HOST = raw_host.strip().rstrip('/')
-    
-    # ĐIỀN CHÍNH XÁC TOKEN THẬT VÀO ĐÂY (Vì tab Environment của bạn đang trống biến này)
     DATABRICKS_TOKEN = os.getenv("DATABRICKS_TOKEN", "dapie52298aa741859bfa3588877a92800e4")
-    
-    # Định danh Endpoint chuẩn từ ảnh quản trị của bạn
     ENDPOINT_NAME = "surge_multiplier_predictor"
 
     now = datetime.now()
@@ -80,64 +76,76 @@ def generate_live_data():
     
     for zone in NCR_ZONES:
         for vtype in random.sample(VEHICLE_TYPES, k=random.randint(4, 6)):
+            # Giả lập các chỉ số tương tự tập Silver đầu vào
             demand_val = float(random.randint(5, 50))
             supply_val = float(max(1.0, float(demand_val * random.uniform(0.2, 1.1))))
+            s_d_ratio = round(supply_val / demand_val, 4) if demand_val > 0 else 1.0
             
+            # Khởi tạo trạng thái giờ cao điểm (Peak hour từ 16h - 20h hoặc 8h - 10h)
+            is_peak = 1.0 if now.hour in [8, 9, 17, 18, 19] else 0.0
+            
+            # Đóng gói chuẩn xác 12 cột đặc trưng (Kiểu dữ liệu Double / Float toán học)
             rows.append({
                 "zone": zone,
                 "vehicle_type": vtype,
                 "demand": float(demand_val),
                 "supply_proxy": float(supply_val),
-                "hour": int(now.hour),
-                "day_of_week": int(now.weekday()),
+                "avg_vtat_clean": float(random.uniform(4.0, 15.0)),
+                "meantemp": float(random.uniform(15.0, 42.0)),
+                "humidity": float(random.uniform(40.0, 90.0)),
+                "wind_speed": float(random.uniform(5.0, 30.0)),
+                "hour": float(now.hour),
+                "day_of_week": float(now.weekday()),
+                "cancel_rate_pct": float(random.uniform(0.0, 45.0)),
+                "is_peak_hour_int": float(is_peak),
+                "traffic_factor": float(random.uniform(1.0, 2.5)),
+                "supply_demand_ratio": float(s_d_ratio),
                 "base_price": float(BASE_PRICES.get(vtype, 70))
             })
             
     df = pd.DataFrame(rows)
-    feature_columns = ["demand", "supply_proxy", "hour", "day_of_week"]
     
-    # Định dạng gói tin dataframe_split theo chuẩn khuyến nghị trên tab Overview Endpoint của bạn
+    # 12 Cột đặc trưng bắt buộc - Khớp thứ tự 100% với file notebook tập huấn mô hình của bạn
+    feature_columns = [
+        "demand", "supply_proxy", "avg_vtat_clean", "meantemp", "humidity", "wind_speed",
+        "hour", "day_of_week", "cancel_rate_pct", "is_peak_hour_int", "traffic_factor", "supply_demand_ratio"
+    ]
+    
+    # Đóng gói định dạng JSON theo đúng chuẩn dữ liệu bảng (dataframe_records)
     scoring_data = {
-        "dataframe_split": {
-            "columns": feature_columns,
-            "data": df[feature_columns].values.tolist()
-        }
+        "dataframe_records": df[feature_columns].to_dict(orient="records")
     }
     
-    # Thiết lập URL chuẩn xác tuyệt đối không lặp từ
     url = f"{DATABRICKS_HOST}/api/2.0/serving-endpoints/{ENDPOINT_NAME}/invocations"
-    
     headers = {
         "Authorization": f"Bearer {DATABRICKS_TOKEN}",
         "Content-Type": "application/json"
     }
     
     try:
-        # Tăng timeout lên 15 giây phòng trường hợp cụm Free Edition phản hồi chậm
-        response = requests.post(url, headers=headers, json=scoring_data, timeout=15)
+        response = requests.post(url, headers=headers, json=scoring_data, timeout=12)
         
         if response.status_code == 200:
-            # Xử lý bóc tách kết quả trả về từ mô hình
             predictions = response.json().get("predictions", [])
             df["surge_multiplier"] = [round(max(1.0, float(p)), 2) for p in predictions]
             df["api_status"] = "CONNECTED (XGBoost Realtime)"
         else:
             df["api_status"] = f"OFFLINE FALLBACK (HTTP {response.status_code})"
+            raise ValueError(f"HTTP {response.status_code}")
             
     except Exception as e:
-        df["api_status"] = f"OFFLINE FALLBACK ({str(e)[:20]})"
-        # Thuật toán dự phòng tính toán tại chỗ nếu kết nối thất bại
+        df["api_status"] = f"OFFLINE FALLBACK ({str(e)[:15]})"
+        # Thuật toán dự phòng khẩn cấp phục hồi đồ thị khi API nghẽn mạng
         surge_list = []
         for _, r in df.iterrows():
-            sdr = r["supply_proxy"] / r["demand"] if r["demand"] > 0 else 1
-            if sdr < 0.4: surge = 2.0
-            elif sdr < 0.7: surge = 1.5
+            if r["demand"] > 30 and r["supply_demand_ratio"] < 0.3: surge = 2.8
+            elif r["demand"] > 20 and r["supply_demand_ratio"] < 0.4: surge = 2.3
+            elif r["demand"] > 10 and r["is_peak_hour_int"] == 1.0: surge = 1.8
             else: surge = 1.0
             surge_list.append(surge)
         df["surge_multiplier"] = surge_list
 
-    # Tính toán các thành phần hiển thị đồ họa
-    df["supply_demand_ratio"] = round(df["supply_proxy"] / df["demand"], 3)
+    # Tính toán các cột bổ trợ giao diện đồ họa
     df["final_price"] = round(df["base_price"] * df["surge_multiplier"], 2)
     df["lat"] = df["zone"].map(lambda z: ZONE_COORDS.get(z, (28.60, 77.20))[0]) + np.random.uniform(-0.005, 0.005, len(df))
     df["lon"] = df["zone"].map(lambda z: ZONE_COORDS.get(z, (28.60, 77.20))[1]) + np.random.uniform(-0.005, 0.005, len(df))
