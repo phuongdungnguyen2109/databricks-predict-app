@@ -19,100 +19,51 @@ Nếu muốn kết nối Delta Table thực:
 # ── INSTALL (chạy 1 lần trong terminal Databricks) ────────────
 # %pip install dash dash-bootstrap-components plotly pandas numpy
 
-import dash
-from dash import dcc, html, Input, Output, callback
-import dash_bootstrap_components as dbc
-import plotly.graph_objects as go
-import plotly.express as px
-import pandas as pd
-import numpy as np
-import random
-from datetime import datetime, timedelta
+import os
+from databricks import sql
+from databricks.sdk.core import Config
 
-# ════════════════════════════════════════════════════════════════
-# 1. DATA LAYER — thay bằng spark.table() khi dùng thực tế
-# ════════════════════════════════════════════════════════════════
-
-NCR_ZONES = [
-    "Connaught Place", "IGI Airport", "Gurugram Cyber City",
-    "Noida Sector 62", "Dwarka Sector 10", "Rohini",
-    "Vaishali", "AIIMS", "Malviya Nagar", "Pitampura",
-    "Kashmere Gate", "Lajpat Nagar", "Saket", "Janakpuri",
-    "Hauz Khas", "Mayur Vihar", "Palam Vihar", "Faridabad",
-    "Ghaziabad", "Central Secretariat"
-]
-
-VEHICLE_TYPES = ["Go Mini", "Go Sedan", "Premier Sedan", "Uber XL", "Auto", "Bike", "eBike"]
-
-BASE_PRICES = {
-    "Go Mini": 70, "Go Sedan": 100, "Premier Sedan": 130,
-    "Uber XL": 160, "Auto": 50, "Bike": 30, "eBike": 30
-}
-
-# Tọa độ gần đúng các khu vực NCR (lat, lon)
-ZONE_COORDS = {
-    "Connaught Place":      (28.6315, 77.2167),
-    "IGI Airport":          (28.5562, 77.1000),
-    "Gurugram Cyber City":  (28.4958, 77.0880),
-    "Noida Sector 62":      (28.6271, 77.3710),
-    "Dwarka Sector 10":     (28.5823, 77.0500),
-    "Rohini":               (28.7120, 77.1300),
-    "Vaishali":             (28.6441, 77.3367),
-    "AIIMS":                (28.5675, 77.2100),
-    "Malviya Nagar":        (28.5330, 77.2090),
-    "Pitampura":            (28.7050, 77.1400),
-    "Kashmere Gate":        (28.6671, 77.2267),
-    "Lajpat Nagar":         (28.5680, 77.2430),
-    "Saket":                (28.5220, 77.2150),
-    "Janakpuri":            (28.6230, 77.0830),
-    "Hauz Khas":            (28.5434, 77.2047),
-    "Mayur Vihar":          (28.6100, 77.2950),
-    "Palam Vihar":          (28.5100, 77.0400),
-    "Faridabad":            (28.4089, 77.3178),
-    "Ghaziabad":            (28.6692, 77.4538),
-    "Central Secretariat":  (28.6145, 77.2090),
-}
+def query_gold_pricing():
+    cfg = Config()  # tự đọc credentials từ môi trường App (OAuth)
+    with sql.connect(
+        server_hostname=cfg.host,
+        http_path=f"/sql/1.0/warehouses/{os.environ['DATABRICKS_WAREHOUSE_ID']}",
+        credentials_provider=lambda: cfg.authenticate,
+    ) as conn:
+        with conn.cursor() as cursor:
+            cursor.execute("""
+                SELECT
+                    pickup_location AS zone,
+                    vehicle_type,
+                    CAST(demand AS DOUBLE) AS demand,
+                    CAST(supply_proxy AS DOUBLE) AS supply,
+                    CAST(supply_demand_ratio AS DOUBLE) AS supply_demand_ratio,
+                    predicted_surge_multiplier AS surge_multiplier,
+                    CAST(base_price AS DOUBLE) AS base_price,
+                    CAST(final_price AS DOUBLE) AS final_price,
+                    CAST(meantemp AS DOUBLE) AS meantemp,
+                    CAST(humidity AS DOUBLE) AS humidity,
+                    CAST(wind_speed AS DOUBLE) AS wind_speed,
+                    CAST(cancel_rate_pct AS DOUBLE) AS cancel_rate,
+                    CAST(avg_vtat_clean AS DOUBLE) AS avg_eta,
+                    is_peak_hour AS is_peak
+                FROM default.uber_gold_pricing
+            """)
+            cols = [c[0] for c in cursor.description]
+            rows = cursor.fetchall()
+    df = pd.DataFrame(rows, columns=cols).fillna(0)
+    return df
 
 
 def generate_live_data():
-    """
-    Sinh dữ liệu surge theo logic thực tế:
-    surge = f(demand, supply_ratio, peak_hour, weather)
-    
-    ── THAY THẾ BẰNG SPARK ──────────────────────────────────
-    """
     try:
-        from pyspark.sql import SparkSession
-        from pyspark.sql.functions import col
-
-        spark = SparkSession.builder.getOrCreate()
-        df = (
-            spark.table("default.uber_gold_pricing")
-            .select(
-                col("pickup_location").alias("zone"),
-                col("vehicle_type"),
-                col("demand").cast("double"),
-                col("supply_proxy").cast("double").alias("supply"),
-                col("supply_demand_ratio").cast("double"),
-                col("predicted_surge_multiplier").alias("surge_multiplier"),
-                col("base_price").cast("double"),
-                col("final_price").cast("double"),
-                col("meantemp").cast("double"),
-                col("humidity").cast("double"),
-                col("wind_speed").cast("double"),
-                col("cancel_rate_pct").cast("double").alias("cancel_rate"),
-                col("avg_vtat_clean").cast("double").alias("avg_eta"),
-                col("is_peak_hour").alias("is_peak"),
-            )
-            .fillna(0)
-            .toPandas()
-        )
-        df["lat"] = df["zone"].map(lambda z: ZONE_COORDS.get(z, (28.60, 77.20))[0])
-        df["lon"] = df["zone"].map(lambda z: ZONE_COORDS.get(z, (28.60, 77.20))[1])
+        df = query_gold_pricing()
         if len(df) > 0:
+            df["lat"] = df["zone"].map(lambda z: ZONE_COORDS.get(z, (28.60, 77.20))[0])
+            df["lon"] = df["zone"].map(lambda z: ZONE_COORDS.get(z, (28.60, 77.20))[1])
             return df
     except Exception as e:
-        print(f"⚠️ Spark read failed: {e} — dùng mock data")
+        print(f"⚠️ SQL read failed: {e} — dùng mock data")
     
     now = datetime.now()
     hour = now.hour
