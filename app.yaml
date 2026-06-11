@@ -3,3 +3,9 @@ command: ["python", "surge_dashboard_app.py"]
 env:
   - name: "DATABRICKS_WAREHOUSE_ID"
     value: "bda20b54525e3c76"
+  - name: "DATABRICKS_HOST"
+    value: "https://dbc-52936fd5-e087.cloud.databricks.com"
+  - name: "DATABRICKS_TOKEN"
+    value: "dapie52298aa741859bfa3588877a92800e4"
+  - name: "MODEL_ENDPOINT_NAME"
+    value: "module5_dynamic_pricing_endpoint"
