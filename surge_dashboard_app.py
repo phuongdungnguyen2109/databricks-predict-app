@@ -22,7 +22,15 @@ Nếu muốn kết nối Delta Table thực:
 import os
 from databricks import sql
 from databricks.sdk.core import Config
-
+import dash
+from dash import dcc, html, Input, Output, callback
+import dash_bootstrap_components as dbc
+import plotly.graph_objects as go
+import plotly.express as px
+import pandas as pd
+import numpy as np
+import random
+from datetime import datetime, timedelta
 def query_gold_pricing():
     cfg = Config()  # tự đọc credentials từ môi trường App (OAuth)
     with sql.connect(
