@@ -132,14 +132,14 @@ def generate_live_data():
         url = f"{DATABRICKS_HOST}/serving-endpoints/{endpoint}/invocations"
         try:
             response = requests.post(url, headers=headers, json=scoring_data, timeout=90)
-            print(f"🔎 [{endpoint}] status={response.status_code} body={response.text[:300]}")
+            print(f"🔎 [{endpoint}] status={response.status_code} body={response.text[:300]}", flush=True)
             if response.status_code == 200:
                 predictions = response.json().get("predictions", [])
                 active_endpoint_name = endpoint
                 success = True
                 break
         except Exception as e:
-            print(f"❌ [{endpoint}] EXCEPTION: {repr(e)}")
+            print(f"❌ [{endpoint}] EXCEPTION: {repr(e)}", flush=True)
             continue
 
     if success and len(predictions) == len(df):
