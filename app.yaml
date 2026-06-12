@@ -4,9 +4,7 @@ env:
   - name: "DATABRICKS_WAREHOUSE_ID"
     valueFrom: "sql_warehouse"
   - name: "DATABRICKS_TOKEN"
-    valueFrom: "surge_model_endpoint"
-  - name: "MODEL_ENDPOINT_NAME"
-    value: "surge_multiplier_predictor"
+    valueFrom: "model_pat_secret"
 
 resources:
   sql_warehouse:
@@ -15,8 +13,9 @@ resources:
       id: "bda20b54525e3c76"
       permission: "CAN_USE"
 
-  surge_model_endpoint:
-    name: "surge_multiplier_predictor"
-    serving_endpoint:
-      name: "surge_multiplier_predictor"
-      permission: "CAN_QUERY"
+  model_pat_secret:
+    name: "model_pat_secret"
+    secret:
+      scope: "ckbigdata-secrets"
+      key: "model-pat"
+      permission: "READ"
