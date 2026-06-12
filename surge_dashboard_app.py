@@ -71,6 +71,7 @@ def generate_live_data():
         raw_host = "https://" + raw_host
     DATABRICKS_HOST = raw_host
     DATABRICKS_TOKEN = os.getenv("DATABRICKS_TOKEN", "dapie52298aa741859bfa3588877a92800e4")
+    print(f"🔑 Token prefix: {DATABRICKS_TOKEN[:8]}... len={len(DATABRICKS_TOKEN)}", flush=True)
     
     # Danh sách các Endpoint bạn đang có để hệ thống tự động quét chéo
     endpoints_to_try = ["surge_multiplier_predictor", "module5_dynamic_pricing_endpoint"]
