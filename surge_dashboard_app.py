@@ -70,7 +70,7 @@ def generate_live_data():
     if not raw_host.startswith("http://") and not raw_host.startswith("https://"):
         raw_host = "https://" + raw_host
     DATABRICKS_HOST = raw_host
-    DATABRICKS_TOKEN = os.getenv("DATABRICKS_TOKEN", "dapie52298aa741859bfa3588877a92800e4")
+    DATABRICKS_TOKEN = os.getenv("DATABRICKS_TOKEN", "dapicd7f4e1e5836be1971f59ee82dc24d51")
     print(f"🔑 Token prefix: {DATABRICKS_TOKEN[:8]}... len={len(DATABRICKS_TOKEN)}", flush=True)
     
     # Danh sách các Endpoint bạn đang có để hệ thống tự động quét chéo
