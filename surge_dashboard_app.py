@@ -66,7 +66,10 @@ def generate_live_data():
     Tích hợp cơ chế chống ngủ đông (Anti-Scale to Zero) và kiểm tra chéo 2 Endpoint.
     """
     raw_host = os.getenv("DATABRICKS_HOST", "https://dbc-52936fd5-e087.cloud.databricks.com")
-    DATABRICKS_HOST = raw_host.strip().rstrip('/')
+    raw_host = raw_host.strip().rstrip('/')
+    if not raw_host.startswith("http://") and not raw_host.startswith("https://"):
+        raw_host = "https://" + raw_host
+    DATABRICKS_HOST = raw_host
     DATABRICKS_TOKEN = os.getenv("DATABRICKS_TOKEN", "dapie52298aa741859bfa3588877a92800e4")
     
     # Danh sách các Endpoint bạn đang có để hệ thống tự động quét chéo
@@ -347,7 +350,8 @@ def update_all(data_json, vtype, threshold, sort_col):
         empty = go.Figure()
         return [], empty, empty, empty, empty, [], "LOADING...", {"color": TEXT_SUB}
 
-    df = pd.read_json(data_json, orient="records")
+    import io
+    df = pd.read_json(io.StringIO(data_json), orient="records")
     
     # Render trạng thái kết nối mô hình lên góc màn hình
     api_status_str = df["api_status"].iloc[0] if "api_status" in df.columns else "UNKNOWN"
