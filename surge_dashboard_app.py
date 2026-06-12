@@ -129,16 +129,17 @@ def generate_live_data():
 
     # Vòng lặp quét lỗi kết nối chéo giữa các Endpoint
     for endpoint in endpoints_to_try:
-        url = f"{DATABRICKS_HOST}/api/2.0/serving-endpoints/{endpoint}/invocations"
+        url = f"{DATABRICKS_HOST}/serving-endpoints/{endpoint}/invocations"
         try:
-            # Tăng timeout lên 25 giây để cho phép mô hình đang ngủ đông (Scaled to zero) có đủ thời gian khởi động lại
-            response = requests.post(url, headers=headers, json=scoring_data, timeout=25)
+            response = requests.post(url, headers=headers, json=scoring_data, timeout=90)
+            print(f"🔎 [{endpoint}] status={response.status_code} body={response.text[:300]}")
             if response.status_code == 200:
                 predictions = response.json().get("predictions", [])
                 active_endpoint_name = endpoint
                 success = True
                 break
-        except Exception:
+        except Exception as e:
+            print(f"❌ [{endpoint}] EXCEPTION: {repr(e)}")
             continue
 
     if success and len(predictions) == len(df):
