@@ -1,4 +1,4 @@
-command: ["python", "surge_dashboard_app.py"]
+command: ["python", "-u", "surge_dashboard_app.py"]
 env:
   - name: "DATABRICKS_WAREHOUSE_ID"
     valueFrom: "sql_warehouse"
