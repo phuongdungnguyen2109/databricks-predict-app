@@ -212,7 +212,7 @@ def kpi_card(title, value, unit="", color=ACCENT, icon=""):
     )
 
 app.layout = html.Div([
-    dcc.Interval(id="refresh", interval=30_000, n_intervals=0),
+    dcc.Interval(id="refresh", interval=300_000, n_intervals=0),
     dcc.Store(id="store"),
 
     # Header
